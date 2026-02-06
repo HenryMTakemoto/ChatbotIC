@@ -108,7 +108,6 @@ def run_telegram_bot():
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), telegram_handle_message))
     
     print("🤖 Telegram Bot iniciado em Background...")
-    app.run_polling()
     app.run_polling(stop_signals=[], drop_pending_updates=True)
 
 
@@ -154,4 +153,5 @@ if prompt := st.chat_input("Teste a IA por aqui também..."):
             st.markdown(resp.content)
 
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 

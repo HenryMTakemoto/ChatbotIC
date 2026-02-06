@@ -1,0 +1,7 @@
+streamlit
+python-telegram-bot
+langchain
+langchain-core
+langchain-community
+langchain-groq
+langchain-nvidia-ai-endpoints

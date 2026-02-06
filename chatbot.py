@@ -131,7 +131,7 @@ st.title("🚜 Cia Agro: Central de Inteligência")
 if not TELEGRAM_TOKEN:
     st.error("Configure as Secrets para iniciar o bot!")
 else:
-    st.success("✅ Servidor Ativo! O Bot do Telegram também deve estar funcionando agora.")
+    st.success("✅ Servidor Ativo! O Bot do Telegram também deve estar funcionando agora. Pode retornar ao Telegram e utilizar o bot.")
     st.caption("Backend: NVIDIA NIM | Modelo: Llama 3.1 405B (Instruct)")
 
 st.markdown("---")
@@ -154,3 +154,4 @@ if prompt := st.chat_input("Teste a IA por aqui também..."):
             st.markdown(resp.content)
 
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+

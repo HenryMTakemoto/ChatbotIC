@@ -6,6 +6,7 @@ langchain-community
 langchain-groq
 langchain-nvidia-ai-endpoints
 langchain-text-splitters
+langchain-huggingface
 sentence-transformers
 pypdf
 faiss-cpu

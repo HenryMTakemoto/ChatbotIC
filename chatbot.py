@@ -14,7 +14,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 if "vectorstore_global" not in st.session_state:
     st.session_state.vectorstore_global = None
 
-vectorstore_compartilhado = None
+vectorstore_ponte = None
 
 # CONFIGURAÇÕES DE SEGURANÇA (SECRETS)
 
@@ -245,6 +245,7 @@ if prompt := st.chat_input("Pergunte algo..."):
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 
 
 

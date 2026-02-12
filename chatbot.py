@@ -6,7 +6,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, Messa
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
@@ -230,4 +230,5 @@ if prompt := st.chat_input("Pergunte algo..."):
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 

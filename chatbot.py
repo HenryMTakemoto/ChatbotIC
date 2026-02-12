@@ -46,7 +46,10 @@ INSTRUÇÕES DE RESPOSTA E CITAÇÃO:
 Seja técnico, conciso e use emojis 🚜.
 """
 # Variável Global para armazenar o Banco de Dados Vetorial
-vectorstore_global = None
+if "vectorstore_global" not in st.session_state:
+    st.session_state.vectorstore_global = None
+
+vectorstore_compartilhado = None
 
 # FUNÇÕES DE RAG (Processamento de PDF)
 
@@ -55,6 +58,8 @@ def get_embeddings_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 def processar_pdf(uploaded_file):
+    global vectorstore_compartilhado # Indica que vamos alterar a variável global
+    
     with open("temp_doc.pdf", "wb") as f:
         f.write(uploaded_file.getbuffer())
     
@@ -64,23 +69,30 @@ def processar_pdf(uploaded_file):
     for doc in documents:
         doc.metadata["source"] = uploaded_file.name
     
-    # Chunk size ajustado para tabelas
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(documents)
     
     embeddings = get_embeddings_model()
-    # Salva no estado global persistente
-    global_state.vectorstore = FAISS.from_documents(chunks, embeddings)
+    
+    # Criar o vectorstore
+    vectorstore = FAISS.from_documents(chunks, embeddings)
+    
+    # Atualiza ambos os estados
+    st.session_state.vectorstore_global = vectorstore
+    vectorstore_compartilhado = vectorstore
     
     return len(chunks)
 
 def buscar_informacao(pergunta):
-    # Acessa o estado global persistente
-    if global_state.vectorstore is None:
+    global vectorstore_compartilhado
+    # Tenta pegar da variável global (usada pelo Telegram) 
+    # ou do session_state (usado pela Web)
+    vs = vectorstore_compartilhado or st.session_state.get("vectorstore_global")
+    
+    if vs is None:
         return None
     
-    # k=15 (Aumentamos drasticamente a busca para garantir que o dado venha)
-    docs = global_state.vectorstore.similarity_search(pergunta, k=15)
+    docs = vs.similarity_search(pergunta, k=15)
     
     trechos_formatados = []
     for d in docs:
@@ -90,7 +102,6 @@ def buscar_informacao(pergunta):
         trechos_formatados.append(f"📄 [FONTE: {nome_arquivo} | Pág: {pagina}]\n{conteudo}")
     
     return "\n\n-----------------\n\n".join(trechos_formatados)
-
 
 
 # INICIALIZAÇÃO DA IA (Função Compartilhada)
@@ -229,6 +240,7 @@ if prompt := st.chat_input("Pergunte algo..."):
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 
 
 

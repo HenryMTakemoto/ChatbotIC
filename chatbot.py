@@ -224,7 +224,7 @@ if prompt := st.chat_input("Pergunte algo..."):
     with st.chat_message("assistant"):
         if llm_instance:
             contexto = buscar_informacao(prompt)
-                with st.expander("🔍 Debug: Ver o que a IA leu no PDF"):
+            with st.expander("🔍 Debug: Ver o que a IA leu no PDF"):
                     st.text(contexto)
             prompt_final = f"{SYSTEM_PROMPT_BASE}\n\nCONTEXTO DO PDF:\n{contexto}" if contexto else SYSTEM_PROMPT_BASE
             
@@ -232,6 +232,7 @@ if prompt := st.chat_input("Pergunte algo..."):
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 
 
 

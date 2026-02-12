@@ -52,48 +52,45 @@ vectorstore_global = None
 
 @st.cache_resource
 def get_embeddings_model():
-    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
 def processar_pdf(uploaded_file):
-    global vectorstore_global
-    
-    # Salva temporariamente
     with open("temp_doc.pdf", "wb") as f:
         f.write(uploaded_file.getbuffer())
     
     loader = PyPDFLoader("temp_doc.pdf")
     documents = loader.load()
     
-    # Inserir o nome real do arquivo nos metadados 
-    # Assim o bot sabe que é "Boletim_Embrapa.pdf" e não "temp_doc.pdf"
     for doc in documents:
         doc.metadata["source"] = uploaded_file.name
     
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=300)
+    # Chunk size ajustado para tabelas
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     chunks = text_splitter.split_documents(documents)
     
     embeddings = get_embeddings_model()
-    vectorstore_global = FAISS.from_documents(chunks, embeddings)
+    # Salva no estado global persistente
+    global_state.vectorstore = FAISS.from_documents(chunks, embeddings)
     
     return len(chunks)
 
 def buscar_informacao(pergunta):
-    global vectorstore_global
-    if vectorstore_global is None:
+    # Acessa o estado global persistente
+    if global_state.vectorstore is None:
         return None
     
-    docs = vectorstore_global.similarity_search(pergunta, k=6)
+    # k=15 (Aumentamos drasticamente a busca para garantir que o dado venha)
+    docs = global_state.vectorstore.similarity_search(pergunta, k=15)
     
-    # Formatando para incluir a fonte no texto que vai pra IA 
     trechos_formatados = []
     for d in docs:
-        nome_arquivo = d.metadata.get("source", "Documento Desconhecido")
+        nome_arquivo = d.metadata.get("source", "Doc")
         pagina = d.metadata.get("page", "?")
-        conteudo = d.page_content
-        # Monta um bloco para a IA ler
         conteudo = d.page_content.replace('\n', ' ') 
-        trechos_formatados.append(f"📄 [FONTE: {nome_arquivo} | Pág: {pagina}]\n{conteudo}")    
-    return "\n\n".join(trechos_formatados)
+        trechos_formatados.append(f"📄 [FONTE: {nome_arquivo} | Pág: {pagina}]\n{conteudo}")
+    
+    return "\n\n-----------------\n\n".join(trechos_formatados)
+
 
 
 # INICIALIZAÇÃO DA IA (Função Compartilhada)
@@ -111,7 +108,7 @@ def get_llm():
             return ChatNVIDIA(
                 nvidia_api_key=NVIDIA_API_KEY,
                 model="meta/llama-3.1-405b-instruct",
-                temperature=0.5,
+                temperature=0.4,
                 max_completion_tokens=1024
             )
     except Exception as e:
@@ -232,6 +229,7 @@ if prompt := st.chat_input("Pergunte algo..."):
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 
 
 

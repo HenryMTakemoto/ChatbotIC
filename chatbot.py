@@ -69,7 +69,7 @@ def processar_pdf(uploaded_file):
     for doc in documents:
         doc.metadata["source"] = uploaded_file.name
     
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=300)
     chunks = text_splitter.split_documents(documents)
     
     embeddings = get_embeddings_model()
@@ -82,7 +82,7 @@ def buscar_informacao(pergunta):
     if vectorstore_global is None:
         return None
     
-    docs = vectorstore_global.similarity_search(pergunta, k=3)
+    docs = vectorstore_global.similarity_search(pergunta, k=6)
     
     # Formatando para incluir a fonte no texto que vai pra IA 
     trechos_formatados = []
@@ -91,8 +91,8 @@ def buscar_informacao(pergunta):
         pagina = d.metadata.get("page", "?")
         conteudo = d.page_content
         # Monta um bloco para a IA ler
-        trechos_formatados.append(f"📄 [FONTE: {nome_arquivo} | Pág: {pagina}]\n{conteudo}")
-    
+        conteudo = d.page_content.replace('\n', ' ') 
+        trechos_formatados.append(f"📄 [FONTE: {nome_arquivo} | Pág: {pagina}]\n{conteudo}")    
     return "\n\n".join(trechos_formatados)
 
 
@@ -224,11 +224,14 @@ if prompt := st.chat_input("Pergunte algo..."):
     with st.chat_message("assistant"):
         if llm_instance:
             contexto = buscar_informacao(prompt)
+                with st.expander("🔍 Debug: Ver o que a IA leu no PDF"):
+                    st.text(contexto)
             prompt_final = f"{SYSTEM_PROMPT_BASE}\n\nCONTEXTO DO PDF:\n{contexto}" if contexto else SYSTEM_PROMPT_BASE
             
             msgs = [SystemMessage(content=prompt_final)] + [HumanMessage(content=m["content"]) for m in st.session_state["web_messages"] if m["role"]=="user"]
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 
 

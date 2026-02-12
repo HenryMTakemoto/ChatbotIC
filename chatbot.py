@@ -5,6 +5,10 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # CONFIGURAÇÕES DE SEGURANÇA (SECRETS)
 
@@ -26,12 +30,71 @@ except Exception as e:
     """)
     st.stop()
 
-SYSTEM_PROMPT = """
-Você é o Assistente Virtual Oficial do projeto 'Cia Agro'.
-Sua persona: Um agrônomo especialista e prestativo.
-Seu objetivo: Ajudar usuários com dúvidas sobre o projeto e agricultura geral.
-Regras: Seja conciso, técnico e use emojis.
+SYSTEM_PROMPT_BASE = """
+Você é o Assistente Virtual do projeto 'Cia Agro'.
+IDENTIDADE: Inteligência Artificial baseada no Llama 3, configurada pela equipe Cia Agro.
+
+INSTRUÇÕES DE RESPOSTA E CITAÇÃO:
+1. AO USAR O CONTEXTO: Se você encontrar a resposta nos trechos abaixo, INICIE sua resposta citando a fonte explicitamente.
+   Exemplo: "Segundo o documento [Nome do Arquivo] (Pág. X), a recomendação é..."
+   
+2. CONHECIMENTO GERAL: Se a resposta NÃO estiver no contexto, responda com seu conhecimento de agronomia, mas avise:
+   "Essa informação não consta nos documentos carregados, mas geralmente..."
+
+3. NÃO INVENTE: Não crie dados técnicos que não existam no texto.
+
+Seja técnico, conciso e use emojis 🚜.
 """
+# Variável Global para armazenar o Banco de Dados Vetorial
+vectorstore_global = None
+
+# FUNÇÕES DE RAG (Processamento de PDF)
+
+@st.cache_resource
+def get_embeddings_model():
+    return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+def processar_pdf(uploaded_file):
+    global vectorstore_global
+    
+    # Salva temporariamente
+    with open("temp_doc.pdf", "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    loader = PyPDFLoader("temp_doc.pdf")
+    documents = loader.load()
+    
+    # Inserir o nome real do arquivo nos metadados 
+    # Assim o bot sabe que é "Boletim_Embrapa.pdf" e não "temp_doc.pdf"
+    for doc in documents:
+        doc.metadata["source"] = uploaded_file.name
+    
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = text_splitter.split_documents(documents)
+    
+    embeddings = get_embeddings_model()
+    vectorstore_global = FAISS.from_documents(chunks, embeddings)
+    
+    return len(chunks)
+
+def buscar_informacao(pergunta):
+    global vectorstore_global
+    if vectorstore_global is None:
+        return None
+    
+    docs = vectorstore_global.similarity_search(pergunta, k=3)
+    
+    # Formatando para incluir a fonte no texto que vai pra IA 
+    trechos_formatados = []
+    for d in docs:
+        nome_arquivo = d.metadata.get("source", "Documento Desconhecido")
+        pagina = d.metadata.get("page", "?")
+        conteudo = d.page_content
+        # Monta um bloco para a IA ler
+        trechos_formatados.append(f"📄 [FONTE: {nome_arquivo} | Pág: {pagina}]\n{conteudo}")
+    
+    return "\n\n".join(trechos_formatados)
+
 
 # INICIALIZAÇÃO DA IA (Função Compartilhada)
 def get_llm():
@@ -64,32 +127,40 @@ telegram_memory = {}
 # LÓGICA DO TELEGRAM (Roda em Segundo Plano)
 
 async def telegram_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_name = update.effective_user.first_name
+    msg = "Olá {user_name}! Sou o Cia Agro Bot, estou rodando o modelo Llama 3.1. 🚜"
+    if vectorstore_global:
+        msg += "\n📚 Estou lendo os manuais técnicos! Ao responder, citarei a fonte."
+    else:
+        msg += "\n⚠️ Nenhum manual carregado. Usando conhecimento geral."
+    
     telegram_memory[update.effective_user.id] = []
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"Olá {user_name}! 🚜\nEstou acordado e usando o modelo Llama 3.1 405B! Pode perguntar."
-    )
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
 
 async def telegram_handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
     
-    # Gerencia memória
     if user_id not in telegram_memory: telegram_memory[user_id] = []
     telegram_memory[user_id].append(HumanMessage(content=text))
-    if len(telegram_memory[user_id]) > 10: telegram_memory[user_id] = telegram_memory[user_id][-10:]
+    if len(telegram_memory[user_id]) > 6: telegram_memory[user_id] = telegram_memory[user_id][-6:] 
     
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
 
     try:
         if llm_instance:
-            msgs = [SystemMessage(content=SYSTEM_PROMPT)] + telegram_memory[user_id]
-            response = llm_instance.invoke(msgs)
+            contexto_pdf = buscar_informacao(text)
             
+            if contexto_pdf:
+                prompt_final = f"{SYSTEM_PROMPT_BASE}\n\nCONTEXTO RECUPERADO DOS MANUAIS:\n{contexto_pdf}"
+                print(f"🔍 RAG: Contexto encontrado no PDF.")
+            else:
+                prompt_final = SYSTEM_PROMPT_BASE + "\n\n(Nenhum documento PDF carregado. Use seu conhecimento geral.)"
+            
+            msgs = [SystemMessage(content=prompt_final)] + telegram_memory[user_id]
+            
+            response = llm_instance.invoke(msgs)
             telegram_memory[user_id].append(AIMessage(content=response.content))
             
-            # Tenta enviar (com fallback de formatação)
             try:
                 await context.bot.send_message(chat_id=update.effective_chat.id, text=response.content, parse_mode="Markdown")
             except:
@@ -97,19 +168,14 @@ async def telegram_handle_message(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         print(f"Erro Telegram: {e}")
 
-# Função que inicia o loop do Telegram
 def run_telegram_bot():
-    # Cria um novo loop de eventos para esta thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler('start', telegram_start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), telegram_handle_message))
-    
-    print("🤖 Telegram Bot iniciado em Background...")
+    print("🤖 Telegram Bot iniciado...")
     app.run_polling(stop_signals=[], drop_pending_updates=True)
-
 
 # THREAD DE BACKGROUND
 @st.cache_resource
@@ -124,17 +190,26 @@ def start_background_bot():
 start_background_bot()
 
 # INTERFACE DO SITE (STREAMLIT)
-st.set_page_config(page_title="Cia Agro Chat", page_icon="🚜")
-st.title("🚜 Cia Agro: Central de Inteligência")
+st.set_page_config(page_title="Cia Agro RAG", page_icon="🚜")
+st.title("🚜 Cia Agro: Central de Inteligência (RAG)")
 
 if not TELEGRAM_TOKEN:
     st.error("Configure as Secrets para iniciar o bot!")
 else:
-    st.success("✅ Servidor Ativo! O Bot do Telegram também deve estar funcionando agora. Pode retornar ao Telegram e utilizar o bot.")
-    st.caption("Backend: NVIDIA NIM | Modelo: Llama 3.1 405B (Instruct)")
+    st.success("✅ Servidor Ativo! O Bot do Telegram está rodando.")
+
+st.sidebar.header("📂 Base de Conhecimento")
+uploaded_file = st.sidebar.file_uploader("Suba o Boletim Técnico (PDF)", type="pdf")
+
+if uploaded_file:
+    with st.spinner("Processando PDF (Chunking & Embedding)..."):
+        num_chunks = processar_pdf(uploaded_file)
+    st.sidebar.success(f"✅ PDF Indexado! ({num_chunks} trechos)")
+    st.info(f"Arquivo carregado: {uploaded_file.name}")
+else:
+    st.sidebar.warning("Nenhum PDF carregado.")
 
 st.markdown("---")
-st.caption("Este site serve como 'cérebro' do bot.")
 
 # CHAT WEB 
 if "web_messages" not in st.session_state: st.session_state["web_messages"] = []
@@ -142,16 +217,17 @@ if "web_messages" not in st.session_state: st.session_state["web_messages"] = []
 for msg in st.session_state["web_messages"]:
     with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-if prompt := st.chat_input("Teste a IA por aqui também..."):
+if prompt := st.chat_input("Pergunte algo..."):
     with st.chat_message("user"): st.markdown(prompt)
     st.session_state["web_messages"].append({"role": "user", "content": prompt})
     
     with st.chat_message("assistant"):
         if llm_instance:
-            msgs = [SystemMessage(content=SYSTEM_PROMPT)] + [HumanMessage(content=m["content"]) for m in st.session_state["web_messages"] if m["role"]=="user"]
+            contexto = buscar_informacao(prompt)
+            prompt_final = f"{SYSTEM_PROMPT_BASE}\n\nCONTEXTO DO PDF:\n{contexto}" if contexto else SYSTEM_PROMPT_BASE
+            
+            msgs = [SystemMessage(content=prompt_final)] + [HumanMessage(content=m["content"]) for m in st.session_state["web_messages"] if m["role"]=="user"]
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
-
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
-
 

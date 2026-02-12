@@ -10,6 +10,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
+# Variável Global para armazenar o Banco de Dados Vetorial
+if "vectorstore_global" not in st.session_state:
+    st.session_state.vectorstore_global = None
+
+vectorstore_compartilhado = None
+
 # CONFIGURAÇÕES DE SEGURANÇA (SECRETS)
 
 # Defina qual IA usar: "NVIDIA" ou "GROQ"
@@ -45,18 +51,13 @@ INSTRUÇÕES DE RESPOSTA E CITAÇÃO:
 
 Seja técnico, conciso e use emojis 🚜.
 """
-# Variável Global para armazenar o Banco de Dados Vetorial
-if "vectorstore_global" not in st.session_state:
-    st.session_state.vectorstore_global = None
-
-vectorstore_compartilhado = None
 
 # FUNÇÕES DE RAG (Processamento de PDF)
 
 @st.cache_resource
 def get_embeddings_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-
+    
 def processar_pdf(uploaded_file):
     global vectorstore_compartilhado # Indica que vamos alterar a variável global
     
@@ -74,21 +75,23 @@ def processar_pdf(uploaded_file):
     
     embeddings = get_embeddings_model()
     
-    # Criar o vectorstore
-    vectorstore = FAISS.from_documents(chunks, embeddings)
+# LÓGICA PARA MÚLTIPLOS PDFs (MERGE)
+    novo_vstore = FAISS.from_documents(chunks, embeddings)
     
-    # Atualiza ambos os estados
-    st.session_state.vectorstore_global = vectorstore
-    vectorstore_compartilhado = vectorstore
+    if st.session_state.vectorstore_global is None:
+        st.session_state.vectorstore_global = novo_vstore
+    else:
+        st.session_state.vectorstore_global.merge_from(novo_vstore)
     
+    # Sincroniza com a thread do Telegram
+    vectorstore_ponte = st.session_state.vectorstore_global
     return len(chunks)
-
+    
 def buscar_informacao(pergunta):
     global vectorstore_compartilhado
     # Tenta pegar da variável global (usada pelo Telegram) 
     # ou do session_state (usado pela Web)
-    vs = vectorstore_compartilhado or st.session_state.get("vectorstore_global")
-    
+    vs = vectorstore_ponte or st.session_state.vectorstore_global    
     if vs is None:
         return None
     
@@ -135,11 +138,13 @@ telegram_memory = {}
 # LÓGICA DO TELEGRAM (Roda em Segundo Plano)
 
 async def telegram_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = "Olá {user_name}! Sou o Cia Agro Bot, estou rodando o modelo Llama 3.1. 🚜"
-    if vectorstore_global:
-        msg += "\n📚 Estou lendo os manuais técnicos! Ao responder, citarei a fonte."
+    global vectorstore_ponte
+    user_name = update.effective_user.first_name 
+    msg = f"Olá {user_name}! Sou o Cia Agro Bot, estou rodando o modelo Llama 3.1. 🚜"
+    if vectorstore_ponte:
+        msg += "\n📚 Estou pronto! Li os manuais técnicos e citarei as fontes."
     else:
-        msg += "\n⚠️ Nenhum manual carregado. Usando conhecimento geral."
+        msg += "\n⚠️ Nenhum manual foi carregado via Web ainda. Usarei conhecimento geral."
     
     telegram_memory[update.effective_user.id] = []
     await context.bot.send_message(chat_id=update.effective_chat.id, text=msg)
@@ -240,6 +245,7 @@ if prompt := st.chat_input("Pergunte algo..."):
             resp = llm_instance.invoke(msgs)
             st.markdown(resp.content)
             st.session_state["web_messages"].append({"role": "assistant", "content": resp.content})
+
 
 
 

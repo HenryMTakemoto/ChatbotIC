@@ -5,3 +5,6 @@ langchain-core
 langchain-community
 langchain-groq
 langchain-nvidia-ai-endpoints
+pypdf
+faiss-cpu
+sentence-transformers

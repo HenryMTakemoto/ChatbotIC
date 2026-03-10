@@ -92,7 +92,7 @@ def add_pdf_to_vectorstore(pdf_file) -> tuple[bool, str]:
     vectorstore.merge_from() para mesclar novos chunks aos existentes.
     """
     from langchain_community.document_loaders import PyPDFLoader
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import FAISS
 
     pdf_name = pdf_file.name

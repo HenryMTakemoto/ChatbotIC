@@ -72,7 +72,7 @@ llm_instance = get_llm()
 # FUNÇÕES RAG — ACUMULAÇÃO DE PDFs
 def get_embeddings_model():
     """Retorna o modelo de embeddings (cached para não recarregar)."""
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_huggingface import HuggingFaceEmbeddings
     return HuggingFaceEmbeddings(
         model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
